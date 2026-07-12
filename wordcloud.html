@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>即時文字雲</title>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js">
+</script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js">
+</script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+  background: #f0f4f8; min-height: 100vh;
+  display: flex; flex-direction: column; align-items: center;
+}
+header {
+  width: 100%; background: #2563eb; color: white; padding: 20px;
+  text-align: center; font-size: 24px; font-weight: bold;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+.container { max-width: 900px; width: 100%; padding: 20px; }
+.input-area {
+  background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  display: flex; gap: 10px; flex-wrap: wrap;
+}
+.input-area input {
+  flex: 1; min-width: 200px; padding: 12px 16px; font-size: 16px;
+  border: 2px solid #e2e8f0; border-radius: 8px; outline: none;
+  transition: border-color 0.2s;
+}
+.input-area input:focus { border-color: #2563eb; }
+.input-area button {
+  padding: 12px 24px; font-size: 16px; border: none; border-radius: 8px;
+  cursor: pointer; font-weight: bold; transition: opacity 0.2s;
+}
+.btn-submit { background: #2563eb; color: white; }
+.btn-clear { background: #ef4444; color: white; }
+.btn-submit:hover, .btn-clear:hover { opacity: 0.85; }
+.stats {
+  background: white; border-radius: 12px; padding: 16px 20px;
+  margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 14px; color: #64748b;
+}
+.stats span { font-weight: bold; color: #2563eb; }
+.cloud-area {
+  background: white; border-radius: 12px; padding: 30px; min-height: 400px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  display: flex; flex-wrap: wrap; align-content: center; justify-content: center;
+  gap: 10px 16px; position: relative;
+}
+.cloud-area .empty {
+  color: #94a3b8; font-size: 18px; position: absolute;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+}
+.word-item {
+  display: inline-block; cursor: default;
+  transition: transform 0.2s, opacity 0.3s;
+  animation: fadeIn 0.4s ease-out;
+}
+.word-item:hover { transform: scale(1.1); }
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.5); }
+  to { opacity: 1; transform: scale(1); }
+}
+.toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: #1e293b; color: white; padding: 12px 24px; border-radius: 8px;
+  font-size: 14px; opacity: 0; transition: opacity 0.3s; pointer-events: none;
+}
+.toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>即時文字雲</header>
+
+<div class="container">
+  <div class="input-area">
+    <input type="text" id="wordInput" placeholder="輸入文字，按 Enter 送出" maxlength="50">
+    <button class="btn-submit" id="submitBtn">送出</button>
+    <button class="btn-clear" id="clearBtn">清除全部</button>
+  </div>
+
+  <div class="stats">
+    <div>總字數：<span id="totalCount">0</span></div>
+    <div>不重複：<span id="uniqueCount">0</span></div>
+  </div>
+
+  <div class="cloud-area" id="cloudArea">
+    <div class="empty">還沒有人輸入文字，試試看輸入一些詞吧！</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyCmVlWWQdPJO3mGi7ynaUcfT9_1ja32fX4",
+  authDomain: "my-teaching-tools-85b45.firebaseapp.com",
+  projectId: "my-teaching-tools-85b45",
+  storageBucket: "my-teaching-tools-85b45.firebasestorage.app",
+  messagingSenderId: "899382423517",
+  appId: "1:899382423517:web:ab146ec9b62ccf71c51034"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const wordsRef = db.collection("wordcloud_words");
+
+const COLORS = ["#2563eb","#dc2626","#059669","#d97706","#7c3aed",
+                "#db2777","#0891b2","#ca8a04","#4f46e5","#ea580c"];
+
+const wordInput = document.getElementById("wordInput");
+const submitBtn = document.getElementById("submitBtn");
+const clearBtn = document.getElementById("clearBtn");
+const cloudArea = document.getElementById("cloudArea");
+const totalCount = document.getElementById("totalCount");
+const uniqueCount = document.getElementById("uniqueCount");
+const toast = document.getElementById("toast");
+
+function showToast(msg) {
+  toast.textContent = msg; toast.classList.add("show");
+  setTimeout(() => toast.classList.remove("show"), 2000);
+}
+
+function getFrequency(words) {
+  const freq = {};
+  words.forEach(w => {
+    const t = (w.text || "").trim();
+    if (t) freq[t] = (freq[t] || 0) + 1;
+  });
+  return freq;
+}
+
+function renderCloud(freq) {
+  const entries = Object.entries(freq);
+  const maxFreq = Math.max(...entries.map(e => e[1]), 1);
+
+  if (entries.length === 0) {
+    cloudArea.innerHTML = '<div class="empty">還沒有人輸入文字，試試看輸入一些詞吧！</div>';
+    totalCount.textContent = "0";
+    uniqueCount.textContent = "0";
+    return;
+  }
+
+  const total = entries.reduce((s, e) => s + e[1], 0);
+  totalCount.textContent = total;
+  uniqueCount.textContent = entries.length;
+
+  cloudArea.innerHTML = entries.map(([word, count], i) => {
+    const ratio = count / maxFreq;
+    const size = Math.round(14 + ratio * 36);
+    const color = COLORS[i % COLORS.length];
+    const rotation = (i % 5) * -4 + 4;
+    return `<span class="word-item" style="font-size:${size}px;color:${color};transform:rotate(${rotation}deg)" title="${count} 次">${word}</span>`;
+  }).join("");
+}
+
+wordsRef.orderBy("created_at", "desc").onSnapshot(snapshot => {
+  const words = [];
+  snapshot.forEach(doc => words.push(doc.data()));
+  const freq = getFrequency(words);
+  renderCloud(freq);
+});
+
+submitBtn.addEventListener("click", submitWord);
+wordInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") submitWord();
+});
+
+function submitWord() {
+  const text = wordInput.value.trim();
+  if (!text) return;
+  wordsRef.add({
+    text: text,
+    created_at: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(() => {
+    wordInput.value = "";
+    showToast("已送出");
+  }).catch(err => {
+    showToast("送出失敗：" + err.message);
+  });
+}
+
+clearBtn.addEventListener("click", () => {
+  if (!confirm("確定清除所有文字？")) return;
+  wordsRef.get().then(snapshot => {
+    const batch = db.batch();
+    snapshot.forEach(doc => batch.delete(doc.ref));
+    return batch.commit();
+  }).then(() => {
+    showToast("已清除全部");
+  }).catch(err => {
+    showToast("清除失敗：" + err.message);
+  });
+});
+</script>
+</body>
+</html>
