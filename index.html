@@ -160,11 +160,17 @@ function renderCloud(freq) {
   }).join("");
 }
 
-wordsRef.onSnapshot(snapshot => {
-  const words = [];
-  snapshot.forEach(doc => words.push(doc.data()));
-  const freq = getFrequency(words);
-  renderCloud(freq);
+wordsRef.onSnapshot({
+  next: snapshot => {
+    const words = [];
+    snapshot.forEach(doc => words.push(doc.data()));
+    const freq = getFrequency(words);
+    renderCloud(freq);
+  },
+  error: err => {
+    document.querySelector(".empty").textContent = "載入失敗：" + err.message;
+    console.error("Firestore error:", err);
+  }
 });
 
 submitBtn.addEventListener("click", submitWord);
