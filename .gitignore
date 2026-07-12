@@ -1,3 +1,6 @@
 node_modules/
 .env
 *.log
+opencode.json
+.mcp.json
+.claude/
