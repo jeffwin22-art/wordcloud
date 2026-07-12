@@ -160,7 +160,7 @@ function renderCloud(freq) {
   }).join("");
 }
 
-wordsRef.orderBy("created_at", "desc").onSnapshot(snapshot => {
+wordsRef.onSnapshot(snapshot => {
   const words = [];
   snapshot.forEach(doc => words.push(doc.data()));
   const freq = getFrequency(words);
